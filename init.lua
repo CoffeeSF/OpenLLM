@@ -4,19 +4,19 @@ local llm = require("lib.llm")
 
 local arguments, options = shell.parse(...)
 local root = arguments[1] or "/openllm"
-local context = tonumber(options.context) or 128
+local context = tonumber(options.context)
 local temperature = tonumber(options.temperature) or 0.7
-
-io.write("OpenLLM stories260K (local INT8)\n")
-io.write("context=" .. context .. "  temperature=" .. temperature .. "\n")
-io.write("Enter a short story beginning. Commands: /quit, /temp <number>, /context <2-512>\n\n")
 
 local function open_runtime()
   return llm.new(root, { context = context, temperature = temperature })
 end
 
 local runtime = open_runtime()
-io.write("model storage=" .. runtime.model.storage_mode .. "\n")
+context = runtime.context
+io.write("OpenLLM stories260K (local INT8)\n")
+io.write("context=" .. context .. "  temperature=" .. temperature .. "\n")
+io.write("model storage=" .. runtime.model.storage_mode .. "  KV cache=" .. runtime.cache_mode .. "\n")
+io.write("Enter a short story beginning. Commands: /quit, /temp <number>, /context <2-512>\n\n")
 while true do
   io.write("> ")
   local prompt = io.read("l")

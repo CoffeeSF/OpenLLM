@@ -54,6 +54,20 @@ local function yield_if_needed(index)
   if index % 16 == 0 then computer.pullSignal(0) end
 end
 
+local function cached_norms(bytes, p, sections)
+  local function vector(offset)
+    local out = {}
+    for i = 1, p.dim do out[i] = storage.f32le(bytes, offset + (i - 1) * 4 + 1) end
+    return out
+  end
+  local norms = { att = {}, ffn = {}, final = vector(sections.norm_final) }
+  for layer = 0, p.n_layers - 1 do
+    norms.att[layer] = vector(sections.norm_att + layer * p.dim * 4)
+    norms.ffn[layer] = vector(sections.norm_ffn + layer * p.dim * 4)
+  end
+  return norms
+end
+
 function model.open(path)
   local file, reason = io.open(path, "rb")
   if not file then error("cannot open model: " .. tostring(reason)) end
@@ -67,7 +81,7 @@ function model.open(path)
     file:seek("set", 0)
     local bytes = storage.read_exact(file, actual)
     file:close()
-    return setmetatable({ bytes = bytes, p = p, sections = sections, storage_mode = "in-memory" }, { __index = model })
+    return setmetatable({ bytes = bytes, p = p, sections = sections, norms = cached_norms(bytes, p, sections), storage_mode = "in-memory" }, { __index = model })
   end
   return setmetatable({ file = file, p = p, sections = sections, storage_mode = "disk-streamed" }, { __index = model })
 end
@@ -75,6 +89,7 @@ end
 function model:close()
   if self.file then self.file:close(); self.file = nil end
   self.bytes = nil
+  self.norms = nil
 end
 
 function model:read(offset, count)
@@ -84,6 +99,11 @@ function model:read(offset, count)
 end
 
 function model:norm(kind, layer, out)
+  if self.norms then
+    local values = kind == "att" and self.norms.att[layer] or kind == "ffn" and self.norms.ffn[layer] or self.norms.final
+    for i = 1, self.p.dim do out[i] = values[i] end
+    return
+  end
   local offset
   if kind == "att" then offset = self.sections.norm_att + layer * self.p.dim * 4
   elseif kind == "ffn" then offset = self.sections.norm_ffn + layer * self.p.dim * 4
@@ -95,6 +115,12 @@ end
 function model:row(section, row, out)
   local width = section.columns
   if row < 0 or row >= section.rows then error("model row outside section") end
+  if self.bytes then
+    local offset = section.offset + row * (width + 4)
+    local scale = storage.f32le(self.bytes, offset + 1)
+    for j = 1, width do out[j] = storage.signed_byte(self.bytes, offset + 4 + j) * scale end
+    return
+  end
   local bytes = self:read(section.offset + row * (width + 4), width + 4)
   local scale = storage.f32le(bytes, 1)
   local values = bytes:sub(5)
@@ -103,6 +129,17 @@ end
 
 function model:matvec(section, row_base, input, output, rows)
   local width = section.columns
+  if self.bytes then
+    for row = 0, rows - 1 do
+      local offset = section.offset + (row_base + row) * (width + 4)
+      local scale = storage.f32le(self.bytes, offset + 1)
+      local sum = 0
+      for col = 1, width do sum = sum + storage.signed_byte(self.bytes, offset + 4 + col) * input[col] end
+      output[row + 1] = sum * scale
+      yield_if_needed(row + 1)
+    end
+    return
+  end
   for row = 0, rows - 1 do
     local bytes = self:read(section.offset + (row_base + row) * (width + 4), width + 4)
     local scale = storage.f32le(bytes, 1)

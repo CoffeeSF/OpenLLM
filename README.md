@@ -11,28 +11,31 @@ An Internet-connected case-machine deployment controller is documented in
 [docs/GATEWAY.md](docs/GATEWAY.md).
 
 The installed model is `OCQ8`, a 276,448-byte, row-quantized INT8 conversion
-of `stories260K`. Lua seeks each matrix row from the RAID-backed file, uses it
-once, and discards it. Only small activation buffers, tokenizer data, logits,
-and a context-sized fixed-point key/value cache are resident in Lua.
+of `stories260K`. On 2 MiB machines Lua streams matrix rows from RAID. On
+4 MiB machines it retains the same compact bytes in memory. Only small
+activation buffers, tokenizer data, logits, and a context-sized fixed-point
+key/value cache are resident in Lua.
 
 ## Hardware target
 
 Use a Tier-3-class OpenComputers machine with **2048 KiB total RAM** and a
 filesystem on the RAID with at least 1 MiB free (3 MiB drives in RAID are more
-than sufficient). The default context is **128 tokens**. It can be changed up
-to the model's **512-token** maximum. Longer contexts use more memory and can
-be too slow or memory-intensive for a 2 MiB machine.
+than sufficient). The default context is **128 tokens** on a 2 MiB machine and
+**256 tokens** on a 4 MiB machine. Both can be changed up to the model's
+**512-token** maximum. Longer contexts use more memory and make each generated
+token slower.
 
 The runtime yields during matrix and attention work with
 `computer.pullSignal(0)` to avoid the execution watchdog. It does not include
 benchmarks or in-game performance tests.
 
 On a machine with **4096 KiB (4 MiB) RAM or more**, normal single-machine
-launches automatically use the in-memory mode. It stores the unchanged compact
-276,448-byte `model.bin` as one Lua string and avoids repeated filesystem row
-reads. A 2048 KiB machine automatically retains the disk-streamed mode. Rack
-mode remains separate: its four servers continue to use their in-memory model
-shards and communicate through modems.
+launches automatically use the in-memory model and KV-cache modes. The model
+is the unchanged compact 276,448-byte `model.bin`; its 256-token packed Q12
+cache is about 160 KiB before Lua table overhead. A 2048 KiB machine retains
+disk-streamed model and cache modes. Rack mode remains separate: its four
+servers continue to use their in-memory model shards and communicate through
+modems with a 128-token default.
 
 ## Install
 
@@ -70,7 +73,7 @@ openllm /mnt/raid/openllm
 ```
 
 Enter a short story beginning, e.g. `Once upon a time`. The interface supports
-`/temp 0.7`, `/context 128`, and `/quit`. A prompt plus its continuation must
+`/temp 0.7`, `/context 256`, and `/quit`. A prompt plus its continuation must
 fit the selected context. This is a TinyStories continuation model, not an
 instruction-following chat assistant.
 
@@ -105,9 +108,10 @@ the largest per-matrix mean error is `0.00155485`. `tools/verify_model.py`
 validates the header, section geometry, row bounds, tokenizer vocabulary, and
 reconstructs every quantized row to check the stored scales and integers.
 
-The intentional additional approximation is Q12 fixed-point storage for the
-on-disk KV cache (1/4096 steps); this keeps context state out of Lua tables.
-Use short prompts and the default 128-token context when checking results
+The intentional additional approximation is Q12 fixed-point storage for the KV
+cache (1/4096 steps). It is stored on disk at 2 MiB and as packed strings at
+4 MiB; neither mode uses Lua numeric tables for cache tensors. Use short
+prompts and the selected default context when checking results
 against a float reference.
 
 ## Model source and license

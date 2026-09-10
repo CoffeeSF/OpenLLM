@@ -6,6 +6,7 @@ local shell = require("shell")
 local internet = require("internet")
 
 local REQUIRED_RAM = 2048 * 1024
+local IN_MEMORY_MIN_RAM = 4096 * 1024
 local REQUIRED_STORAGE = 1024 * 1024 -- model is 277 KiB; leave room for OS and cache
 local DEFAULT_BASE = "https://raw.githubusercontent.com/CoffeeSF/OpenLLM/main"
 local FILES = {
@@ -64,6 +65,10 @@ local ram = computer.totalMemory()
 print("OpenLLM installer")
 print("RAM: " .. math.floor(ram / 1024) .. " KiB (requires 2048 KiB)")
 if ram < REQUIRED_RAM then error("not enough installed RAM") end
+if not rack_image then
+  if ram >= IN_MEMORY_MIN_RAM then print("Single-machine mode: in-memory model and KV cache (default context 256)")
+  else print("Single-machine mode: disk-streamed model and KV cache (default context 128)") end
+end
 report_filesystems()
 local target_fs = filesystem.get(destination)
 if not target_fs then error("cannot find filesystem for " .. destination) end
@@ -87,7 +92,7 @@ local tokenizer_size = tokenizer:seek("end"); tokenizer:close()
 if model_size ~= 276448 or tokenizer_size ~= 6227 then
   error("downloaded model asset has an unexpected size; do not run it")
 end
-mkdir_p(destination .. "/cache")
+if ram < IN_MEMORY_MIN_RAM then mkdir_p(destination .. "/cache") end
 
 if rack_image then
   -- The disk-image workflow is explicitly allowed to configure its blank

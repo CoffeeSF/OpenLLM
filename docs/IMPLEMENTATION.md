@@ -17,13 +17,14 @@ The implementation targets the `stories260K` TinyStories checkpoint:
 | Attention | 8 query heads, 4 key/value heads |
 | Vocabulary | 512 BPE pieces |
 | Model maximum sequence length | 512 tokens |
-| Runtime context limit | 512 tokens; default 128 |
+| Runtime context limit | 512 tokens; default 128 (2 MiB) or 256 (4 MiB) |
 | Installed INT8 model | 276,448 bytes |
 
-The runtime supports the model's full 512-token sequence length and defaults
-to 128 tokens. Larger contexts consume more OpenComputers RAM and make each
-generated token slower. It is not a rolling window: prompt tokens plus
-generated tokens must fit inside the chosen context.
+The runtime supports the model's full 512-token sequence length. It defaults
+to 128 tokens in 2 MiB disk-streamed mode and 256 tokens in 4 MiB in-memory
+mode. Larger contexts consume more OpenComputers RAM and make each generated
+token slower. It is not a rolling window: prompt tokens plus generated tokens
+must fit inside the chosen context.
 
 ## Installed layout
 
@@ -42,12 +43,13 @@ generated tokens must fit inside the chosen context.
     model.bin              row-quantized INT8 checkpoint
     tokenizer.bin          llama2.c-compatible tokenizer data
     config.lua             generated model metadata
-  cache/
+  cache/                   used only by the 2 MiB disk-streamed mode
     kv-0.bin ... kv-4.bin  temporary per-layer key/value caches
 ```
 
-`cache/` is created at first run. It is safe to delete while the model is not
-running; it only contains the current prompt's transient attention state.
+`cache/` is created only in disk-streamed mode. It is safe to delete while the
+model is not running; it only contains the current prompt's transient attention
+state.
 
 ## OCQ8 model format
 
@@ -64,11 +66,11 @@ float32 scale | int8 weight[columns]
 ```
 
 For a matrix-vector multiply, `lib/model.lua` reads one row's scale and signed
-INT8 bytes, computes the dot product with the current activation, then releases
-those temporary bytes. At 2048 KiB it seeks each row from disk. At 4096 KiB or
-more it automatically retains the complete unchanged OCQ8 file as one compact
-Lua string, avoiding repeated filesystem reads without turning weights into
-large Lua number tables.
+INT8 bytes and computes the dot product with the current activation. At 2048
+KiB it seeks each row from disk. At 4096 KiB or more it retains the unchanged
+OCQ8 file as one compact Lua string, reads weights at direct byte offsets, and
+caches the 704 RMS-normalization values. It does not turn weights into large
+Lua number tables.
 
 The token embedding table is also row-addressable. Because stories260K ties its
 classifier to the embedding table, the final vocabulary projection reuses that
@@ -83,7 +85,8 @@ For each input or generated token, `lib/llm.lua` performs this sequence:
    query, key, value, attention-output, and feed-forward matrix rows.
 3. Apply RoPE position rotation in Lua; source RoPE lookup tables are not kept
    in the installed model.
-4. Append the layer's key and value vectors to `cache/kv-<layer>.bin`.
+4. Append the layer's Q12 key and value vectors to an in-memory packed string
+   at 4 MiB, or `cache/kv-<layer>.bin` at 2 MiB.
 5. Read only the context-so-far cache to calculate causal attention.
 6. Apply the feed-forward SwiGLU block and residual connection.
 7. Apply final RMS normalization and stream the tied embedding rows to produce
@@ -99,12 +102,14 @@ watchdog.
 
 Only the working activations are Lua numeric tables: several 64-value vectors,
 two 172-value feed-forward buffers, 512 logits, and an attention-score vector
-the size of the selected context. Weights remain compact bytes on disk.
+the size of the selected context. Weights remain compact bytes on disk at 2
+MiB or in one compact Lua string at 4 MiB.
 
-The KV cache stays on disk rather than as a large Lua table. Key/value elements
-are Q12 fixed-point signed 16-bit values (a step of 1/4096). This is a small,
-intentional approximation in addition to the INT8 weights and is what lets the
-runtime fit comfortably within the 2048 KiB target.
+Key/value elements are Q12 fixed-point signed 16-bit values (a step of
+1/4096). At 2 MiB the cache stays on disk. At 4 MiB it is retained as one
+128-byte packed string per layer and token, avoiding cache filesystem access
+without constructing Lua numeric cache tables. This intentional approximation
+in addition to the INT8 weights keeps the 2 MiB runtime within its target.
 
 ## Tokenizer and sampling
 
@@ -123,7 +128,8 @@ randomness or service dependency.
 
 The installer checks total RAM, detects all filesystem components, calculates
 free space as `spaceTotal - spaceUsed`, and requires at least 1 MiB free at the
-destination. It downloads the Lua files and model assets, verifies expected
+destination. It selects the 4 MiB in-memory single-machine mode or the 2 MiB
+disk-streamed mode, downloads the Lua files and model assets, verifies expected
 model/tokenizer byte sizes, and creates an `openllm` launcher when `/bin` is
 writable.
 
@@ -144,7 +150,7 @@ openllm /mnt/314/openllm
 
 In the terminal interface, use a short story beginning. `/temp 0` chooses the
 most likely next token; `/temp 0.7` is the default stochastic mode;
-`/context 128` changes the context for the next prompt; and `/quit` exits.
+`/context 256` changes the context for the next prompt; and `/quit` exits.
 
 ## Development verification
 

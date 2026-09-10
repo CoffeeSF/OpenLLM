@@ -1,4 +1,4 @@
--- Local, disk-streamed INT8 stories260K forward pass for OpenComputers.
+-- Local INT8 stories260K forward pass for OpenComputers.
 local filesystem = require("filesystem")
 local storage = require("lib.storage")
 local model_reader = require("lib.model")
@@ -17,12 +17,18 @@ function llm.new(root, options)
   self.root = root
   self.model = model_reader.open(root .. "/model/model.bin")
   self.p = self.model.p
-  self.context = math.min(options.context or 128, self.p.max_seq_len)
+  local default_context = self.model.storage_mode == "in-memory" and 256 or 128
+  self.context = math.min(options.context or default_context, self.p.max_seq_len)
   if self.context < 2 then error("context must be at least 2 tokens") end
   self.tok = tokenizer.load(root .. "/model/tokenizer.bin", self.p.vocab_size)
   self.sample = sampler.new(options.temperature or 0.7, options.seed or math.floor(computer.uptime() * 1000) + 1)
-  self.cache_root = root .. "/cache"
-  storage.mkdir_p(filesystem, self.cache_root)
+  self.cache_mode = self.model.storage_mode == "in-memory" and "in-memory" or "disk"
+  if self.cache_mode == "disk" then
+    self.cache_root = root .. "/cache"
+    storage.mkdir_p(filesystem, self.cache_root)
+  else
+    self.cache = {}
+  end
   local p = self.p
   self.x, self.xb, self.xb2 = tensor.zeros(p.dim), tensor.zeros(p.dim), tensor.zeros(p.dim)
   self.q, self.k, self.v = tensor.zeros(p.dim), tensor.zeros(p.dim * p.n_kv_heads / p.n_heads), tensor.zeros(p.dim * p.n_kv_heads / p.n_heads)
@@ -34,9 +40,17 @@ function llm.new(root, options)
   return self
 end
 
-function llm:close() self.model:close() end
+function llm:close()
+  self.cache = nil
+  self.model:close()
+end
 
 function llm:reset()
+  if self.cache_mode == "in-memory" then
+    self.cache = {}
+    for layer = 0, self.p.n_layers - 1 do self.cache[layer] = {} end
+    return
+  end
   for layer = 0, self.p.n_layers - 1 do
     local file = io.open(cache_path(self.cache_root, layer), "wb")
     if not file then error("cannot reset KV cache; model directory must be writable") end
@@ -48,8 +62,59 @@ local function cache_vector(file, vector, count)
   for i = 1, count do storage.write_i16be(file, vector[i] * 4096) end
 end
 
-local function read_cache_vector(bytes, offset, target, target_offset, count)
-  for i = 1, count do target[target_offset + i] = storage.i16be(bytes, offset + (i - 1) * 2) / 4096 end
+local function attend_memory(self, layer, position, kv_dim, head_size)
+  local cache = self.cache[layer]
+  cache[position + 1] = storage.pack_q12(self.k, kv_dim) .. storage.pack_q12(self.v, kv_dim)
+  local p = self.p
+  for head = 0, p.n_heads - 1 do
+    local q_offset = head * head_size
+    local kv_offset = math.floor(head / (p.n_heads / p.n_kv_heads)) * head_size
+    for t = 0, position do
+      local entry = cache[t + 1]
+      local base = kv_offset * 2 + 1
+      local score = 0
+      for i = 1, head_size do score = score + self.q[q_offset + i] * storage.i16be(entry, base + (i - 1) * 2) / 4096 end
+      self.att[t + 1] = score / math.sqrt(head_size)
+    end
+    tensor.softmax(self.att, position + 1)
+    for i = 1, head_size do self.xb[q_offset + i] = 0 end
+    for t = 0, position do
+      local entry = cache[t + 1]
+      local base = kv_dim * 2 + kv_offset * 2 + 1
+      local probability = self.att[t + 1]
+      for i = 1, head_size do self.xb[q_offset + i] = self.xb[q_offset + i] + probability * storage.i16be(entry, base + (i - 1) * 2) / 4096 end
+    end
+    computer.pullSignal(0)
+  end
+end
+
+local function attend_disk(self, layer, position, kv_dim, head_size)
+  local path = cache_path(self.cache_root, layer)
+  local append = assert(io.open(path, "ab"))
+  cache_vector(append, self.k, kv_dim); cache_vector(append, self.v, kv_dim)
+  append:close()
+  local cache = assert(io.open(path, "rb"))
+  local cache_bytes = storage.read_exact(cache, (position + 1) * kv_dim * 4)
+  cache:close()
+  local p = self.p
+  for head = 0, p.n_heads - 1 do
+    local q_offset = head * head_size
+    local kv_offset = math.floor(head / (p.n_heads / p.n_kv_heads)) * head_size
+    for t = 0, position do
+      local base = t * kv_dim * 4 + kv_offset * 2 + 1
+      local score = 0
+      for i = 1, head_size do score = score + self.q[q_offset + i] * storage.i16be(cache_bytes, base + (i - 1) * 2) / 4096 end
+      self.att[t + 1] = score / math.sqrt(head_size)
+    end
+    tensor.softmax(self.att, position + 1)
+    for i = 1, head_size do self.xb[q_offset + i] = 0 end
+    for t = 0, position do
+      local base = t * kv_dim * 4 + kv_dim * 2 + kv_offset * 2 + 1
+      local probability = self.att[t + 1]
+      for i = 1, head_size do self.xb[q_offset + i] = self.xb[q_offset + i] + probability * storage.i16be(cache_bytes, base + (i - 1) * 2) / 4096 end
+    end
+    computer.pullSignal(0)
+  end
 end
 
 function llm:forward(token, position)
@@ -76,32 +141,8 @@ function llm:forward(token, position)
       end
     end
 
-    local path = cache_path(self.cache_root, layer)
-    local append = assert(io.open(path, "ab"))
-    cache_vector(append, self.k, kv_dim); cache_vector(append, self.v, kv_dim)
-    append:close()
-    local cache = assert(io.open(path, "rb"))
-    local cache_bytes = storage.read_exact(cache, (position + 1) * kv_dim * 4)
-    cache:close()
-
-    for head = 0, p.n_heads - 1 do
-      local q_offset = head * head_size
-      local kv_offset = math.floor(head / (p.n_heads / p.n_kv_heads)) * head_size
-      for t = 0, position do
-        local base = t * kv_dim * 4 + kv_offset * 2 + 1
-        local score = 0
-        for i = 1, head_size do score = score + self.q[q_offset + i] * storage.i16be(cache_bytes, base + (i - 1) * 2) / 4096 end
-        self.att[t + 1] = score / math.sqrt(head_size)
-      end
-      tensor.softmax(self.att, position + 1)
-      for i = 1, head_size do self.xb[q_offset + i] = 0 end
-      for t = 0, position do
-        local base = t * kv_dim * 4 + kv_dim * 2 + kv_offset * 2 + 1
-        local probability = self.att[t + 1]
-        for i = 1, head_size do self.xb[q_offset + i] = self.xb[q_offset + i] + probability * storage.i16be(cache_bytes, base + (i - 1) * 2) / 4096 end
-      end
-      computer.pullSignal(0)
-    end
+    if self.cache_mode == "in-memory" then attend_memory(self, layer, position, kv_dim, head_size)
+    else attend_disk(self, layer, position, kv_dim, head_size) end
     m:matvec(m.sections.wo, layer * dim, self.xb, self.xb2, dim)
     for i = 1, dim do self.x[i] = self.x[i] + self.xb2[i] end
 

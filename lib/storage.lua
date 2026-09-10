@@ -2,6 +2,11 @@
 local storage = {}
 
 local function byte(s, i) return string.byte(s, i) or 0 end
+local function i16be_bytes(number)
+  number = math.max(-32768, math.min(32767, math.floor(number + (number >= 0 and 0.5 or -0.5))))
+  if number < 0 then number = number + 65536 end
+  return string.char(math.floor(number / 256), number % 256)
+end
 
 function storage.u32le(s, i)
   i = i or 1
@@ -49,9 +54,13 @@ function storage.mkdir_p(filesystem, path)
 end
 
 function storage.write_i16be(file, number)
-  number = math.max(-32768, math.min(32767, math.floor(number + (number >= 0 and 0.5 or -0.5))))
-  if number < 0 then number = number + 65536 end
-  file:write(string.char(math.floor(number / 256), number % 256))
+  file:write(i16be_bytes(number))
+end
+
+function storage.pack_q12(values, count)
+  local out = {}
+  for i = 1, count do out[i] = i16be_bytes(values[i] * 4096) end
+  return table.concat(out)
 end
 
 return storage
