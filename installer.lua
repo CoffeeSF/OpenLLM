@@ -11,7 +11,10 @@ local DEFAULT_BASE = "https://raw.githubusercontent.com/CoffeeSF/OpenLLM/main"
 local FILES = {
   "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "init.lua", "openllm.lua",
   "lib/storage.lua", "lib/model.lua", "lib/tokenizer.lua", "lib/tensor.lua", "lib/sampler.lua", "lib/llm.lua",
+  "lib/protocol.lua", "lib/distributed_model.lua", "lib/distributed.lua",
+  "server/coordinator.lua", "server/worker.lua", "config/rack.lua",
   "model/config.lua", "model/model.bin", "model/model.bin.sha256", "model/tokenizer.bin",
+  "model/shard-0.bin", "model/shard-1.bin", "model/shard-2.bin", "model/shard-3.bin",
 }
 
 local function mkdir_p(path)

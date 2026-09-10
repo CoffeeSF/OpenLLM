@@ -6,6 +6,7 @@ API, host-side process, or Internet Card requirement after installation.
 
 For the runtime design, model-file layout, token flow, and operational limits,
 see [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md).
+The optional four-server rack mode is documented in [docs/RACK.md](docs/RACK.md).
 
 The installed model is `OCQ8`, a 276,448-byte, row-quantized INT8 conversion
 of `stories260K`. Lua seeks each matrix row from the RAID-backed file, uses it
