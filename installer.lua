@@ -12,6 +12,7 @@ local FILES = {
   "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "init.lua", "openllm.lua",
   "lib/storage.lua", "lib/model.lua", "lib/tokenizer.lua", "lib/tensor.lua", "lib/sampler.lua", "lib/llm.lua",
   "lib/protocol.lua", "lib/distributed_model.lua", "lib/distributed.lua",
+  "lib/cluster.lua", "rack_boot.lua",
   "server/coordinator.lua", "server/worker.lua", "config/rack.lua",
   "model/config.lua", "model/model.bin", "model/model.bin.sha256", "model/tokenizer.bin",
   "model/shard-0.bin", "model/shard-1.bin", "model/shard-2.bin", "model/shard-3.bin",
@@ -55,7 +56,8 @@ local function download(url, destination)
 end
 
 local arguments = shell.parse(...)
-local destination = arguments[1] or "/openllm"
+local rack_image = arguments[1] == "rack-image"
+local destination = (rack_image and arguments[2]) or arguments[1] or "/openllm"
 local base = (arguments[2] or DEFAULT_BASE):gsub("/$", "")
 
 local ram = computer.totalMemory()
@@ -86,6 +88,17 @@ if model_size ~= 276448 or tokenizer_size ~= 6227 then
   error("downloaded model asset has an unexpected size; do not run it")
 end
 mkdir_p(destination .. "/cache")
+
+if rack_image then
+  -- The disk-image workflow is explicitly allowed to configure its blank
+  -- destination disk to boot into the self-configuring rack service.
+  local boot_path = filesystem.path(destination) .. "/autorun.lua"
+  if filesystem.exists(boot_path) then error("rack image will not replace existing " .. boot_path) end
+  local boot = assert(io.open(boot_path, "w"))
+  boot:write("local root = " .. string.format("%q", destination) .. "; package.path = root .. '/?.lua;' .. package.path; return assert(loadfile(root .. '/rack_boot.lua'))(root)\n")
+  boot:close()
+  print("Rack image boot service configured: " .. boot_path)
+end
 
 local launcher = "/bin/openllm.lua"
 local replace_launcher = not filesystem.exists(launcher)

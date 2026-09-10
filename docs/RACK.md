@@ -20,7 +20,34 @@ This is tensor parallelism, not a pipeline: every generated token still waits
 for all layers and workers. It may reduce weight-read work, but modem latency
 can outweigh the benefit on some 1.7.10 worlds.
 
-## Install
+## Clone-safe disk image install
+
+For four identical disks that configure themselves on boot, use a separate
+master OpenOS computer only while preparing one blank destination disk:
+
+```sh
+wget -f https://raw.githubusercontent.com/CoffeeSF/OpenLLM/main/installer.lua installer.lua
+lua installer.lua rack-image /mnt/314/openllm
+```
+
+This writes all four model shards and a small `/autorun.lua` boot service to
+the destination disk. Shut down the master, duplicate that disk four times,
+put one clone in each Tier-3 rack server, install a Network Card/modem in each,
+and turn on all four servers. The master is not used again.
+
+Every clone broadcasts its computer and modem addresses, accepts only the
+`openllm-cluster` protocol version and matching model ID, waits for exactly four
+compatible members, then sorts the four **computer** addresses. The lowest
+address receives shard 0 and becomes coordinator; the other addresses receive
+shards 1–3 in sorted order. Each clone writes its own generated
+`config/rack.lua` and starts its role automatically. A reboot repeats discovery
+and receives the same deterministic role when the same machines are present.
+
+If fewer or more than four compatible servers are found, no inference starts.
+An unrelated modem is ignored. A worker timeout during inference aborts the
+current generation instead of using stale results.
+
+## Manual install
 
 Install the same release on all four servers; this downloads all shards so each
 machine can be assigned a role:
@@ -30,7 +57,7 @@ wget -f https://raw.githubusercontent.com/CoffeeSF/OpenLLM/main/installer.lua in
 lua installer.lua /mnt/314/openllm
 ```
 
-On each server, run `component.modem.address()` in Lua and record the four
+On each server, run `component.modem.address` in Lua and record the four
 addresses. Edit `/mnt/314/openllm/config/rack.lua` on every server so
 `coordinator` is server 0's modem address and `workers[1]` through `workers[3]`
 are the other three addresses. Keep the same file on all four machines.
