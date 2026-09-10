@@ -85,9 +85,18 @@ end
 mkdir_p(destination .. "/cache")
 
 local launcher = "/bin/openllm.lua"
-if not filesystem.exists(launcher) then
+local replace_launcher = not filesystem.exists(launcher)
+if not replace_launcher then
+  local prior = io.open(launcher, "r")
+  local prior_text = prior and prior:read("*a") or ""
+  if prior then prior:close() end
+  -- Safely upgrade a launcher made by an earlier OpenLLM installer, but never
+  -- overwrite an unrelated user command with the same name.
+  replace_launcher = prior_text:find("loadfile", 1, true) ~= nil and prior_text:find("/init.lua", 1, true) ~= nil
+end
+if replace_launcher then
   local out = assert(io.open(launcher, "w"))
-  out:write("local root = " .. string.format("%q", destination) .. "; package.path = root .. '/?.lua;' .. package.path; return assert(loadfile(root .. '/init.lua'))(...)\n")
+  out:write("-- OpenLLM launcher\nlocal root = " .. string.format("%q", destination) .. "; package.path = root .. '/?.lua;' .. package.path; return assert(loadfile(root .. '/init.lua'))(root, ...)\n")
   out:close()
   print("Installed command: openllm")
 else
