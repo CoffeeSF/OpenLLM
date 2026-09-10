@@ -60,9 +60,8 @@ print("OpenLLM installer")
 print("RAM: " .. math.floor(ram / 1024) .. " KiB (requires 2048 KiB)")
 if ram < REQUIRED_RAM then error("not enough installed RAM") end
 report_filesystems()
-local target_address = filesystem.get(destination)
-if not target_address then error("cannot find filesystem for " .. destination) end
-local target_fs = component.proxy(target_address)
+local target_fs = filesystem.get(destination)
+if not target_fs then error("cannot find filesystem for " .. destination) end
 local available = space_available(target_fs)
 print("Destination: " .. destination .. " (" .. math.floor(available / 1024) .. " KiB free)")
 if available < REQUIRED_STORAGE then error("destination needs at least " .. REQUIRED_STORAGE / 1024 .. " KiB free") end
