@@ -4,6 +4,9 @@ This is a complete local inference runtime for Karpathy's **TinyStories
 stories260K** model. It runs in one OpenComputers computer: there is no server,
 API, host-side process, or Internet Card requirement after installation.
 
+For the runtime design, model-file layout, token flow, and operational limits,
+see [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md).
+
 The installed model is `OCQ8`, a 276,448-byte, row-quantized INT8 conversion
 of `stories260K`. Lua seeks each matrix row from the RAID-backed file, uses it
 once, and discards it. Only small activation buffers, tokenizer data, logits,
@@ -27,14 +30,14 @@ OpenComputers, with an Internet Card installed, run:
 
 ```sh
 wget -f https://raw.githubusercontent.com/CoffeeSF/OpenLLM/main/installer.lua installer.lua
-installer
+lua installer.lua /openllm
 ```
 
 To keep the OS and model on separate filesystems, pass both a destination on
 the RAID and the exact release URL:
 
 ```sh
-installer /mnt/raid/openllm https://raw.githubusercontent.com/CoffeeSF/OpenLLM/main
+lua installer.lua /mnt/raid/openllm
 ```
 
 The installer checks RAM and destination free space, lists every detected
@@ -46,6 +49,13 @@ may then be removed.
 
 ```sh
 openllm
+```
+
+If this was installed on a non-root filesystem by an older installer, provide
+the install path explicitly:
+
+```sh
+openllm /mnt/raid/openllm
 ```
 
 Enter a short story beginning, e.g. `Once upon a time`. The interface supports
