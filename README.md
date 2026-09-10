@@ -73,7 +73,7 @@ openllm /mnt/raid/openllm
 ```
 
 Enter a short story beginning, e.g. `Once upon a time`. The interface supports
-`/temp 0.7`, `/context 256`, and `/quit`. A prompt plus its continuation must
+`/temp 0`, `/context 256`, and `/quit`. A prompt plus its continuation must
 fit the selected context. This is a TinyStories continuation model, not an
 instruction-following chat assistant.
 

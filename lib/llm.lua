@@ -11,6 +11,20 @@ local llm = {}
 
 local function cache_path(root, layer) return root .. "/kv-" .. layer .. ".bin" end
 
+local function build_rope(context, head_size)
+  local rows = {}
+  for position = 0, context - 1 do
+    local row = {}
+    for head_dim = 0, head_size - 1, 2 do
+      local angle = position / (10000 ^ (head_dim / head_size))
+      local at = head_dim + 1
+      row[at], row[at + 1] = math.cos(angle), math.sin(angle)
+    end
+    rows[position + 1] = row
+  end
+  return rows
+end
+
 function llm.new(root, options)
   options = options or {}
   local self = setmetatable({}, { __index = llm })
@@ -21,13 +35,14 @@ function llm.new(root, options)
   self.context = math.min(options.context or default_context, self.p.max_seq_len)
   if self.context < 2 then error("context must be at least 2 tokens") end
   self.tok = tokenizer.load(root .. "/model/tokenizer.bin", self.p.vocab_size)
-  self.sample = sampler.new(options.temperature or 0.7, options.seed or math.floor(computer.uptime() * 1000) + 1)
+  self.sample = sampler.new(options.temperature or 0, options.seed or math.floor(computer.uptime() * 1000) + 1)
   self.cache_mode = self.model.storage_mode == "in-memory" and "in-memory" or "disk"
   if self.cache_mode == "disk" then
     self.cache_root = root .. "/cache"
     storage.mkdir_p(filesystem, self.cache_root)
   else
     self.cache = {}
+    self.rope = build_rope(self.context, self.p.dim / self.p.n_heads)
   end
   local p = self.p
   self.x, self.xb, self.xb2 = tensor.zeros(p.dim), tensor.zeros(p.dim), tensor.zeros(p.dim)
@@ -42,6 +57,7 @@ end
 
 function llm:close()
   self.cache = nil
+  self.rope = nil
   self.model:close()
 end
 
@@ -128,16 +144,29 @@ function llm:forward(token, position)
     m:matvec(m.sections.wk, layer * kv_dim, self.xb, self.k, kv_dim)
     m:matvec(m.sections.wv, layer * kv_dim, self.xb, self.v, kv_dim)
 
-    -- RoPE, computed rather than retaining the source checkpoint's lookup table.
-    for i = 1, dim, 2 do
-      local head_dim = (i - 1) % head_size
-      local angle = position / (10000 ^ (head_dim / head_size))
-      local cosine, sine = math.cos(angle), math.sin(angle)
-      local a, b = self.q[i], self.q[i + 1]
-      self.q[i], self.q[i + 1] = a * cosine - b * sine, a * sine + b * cosine
-      if i <= kv_dim then
-        a, b = self.k[i], self.k[i + 1]
-        self.k[i], self.k[i + 1] = a * cosine - b * sine, a * sine + b * cosine
+    if self.rope then
+      local rope = self.rope[position + 1]
+      for i = 1, dim, 2 do
+        local head_dim = (i - 1) % head_size
+        local cosine, sine = rope[head_dim + 1], rope[head_dim + 2]
+        local a, b = self.q[i], self.q[i + 1]
+        self.q[i], self.q[i + 1] = a * cosine - b * sine, a * sine + b * cosine
+        if i <= kv_dim then
+          a, b = self.k[i], self.k[i + 1]
+          self.k[i], self.k[i + 1] = a * cosine - b * sine, a * sine + b * cosine
+        end
+      end
+    else
+      for i = 1, dim, 2 do
+        local head_dim = (i - 1) % head_size
+        local angle = position / (10000 ^ (head_dim / head_size))
+        local cosine, sine = math.cos(angle), math.sin(angle)
+        local a, b = self.q[i], self.q[i + 1]
+        self.q[i], self.q[i + 1] = a * cosine - b * sine, a * sine + b * cosine
+        if i <= kv_dim then
+          a, b = self.k[i], self.k[i + 1]
+          self.k[i], self.k[i + 1] = a * cosine - b * sine, a * sine + b * cosine
+        end
       end
     end
 

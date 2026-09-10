@@ -68,6 +68,21 @@ local function cached_norms(bytes, p, sections)
   return norms
 end
 
+local function cached_scales(bytes, sections)
+  local scales = {}
+  for _, name in ipairs({ "emb", "wq", "wk", "wv", "wo", "w1", "w2", "w3", "cls" }) do
+    local section = sections[name]
+    if not scales[section] then
+      local values = {}
+      for row = 0, section.rows - 1 do
+        values[row + 1] = storage.f32le(bytes, section.offset + row * (section.columns + 4) + 1)
+      end
+      scales[section] = values
+    end
+  end
+  return scales
+end
+
 function model.open(path)
   local file, reason = io.open(path, "rb")
   if not file then error("cannot open model: " .. tostring(reason)) end
@@ -81,7 +96,7 @@ function model.open(path)
     file:seek("set", 0)
     local bytes = storage.read_exact(file, actual)
     file:close()
-    return setmetatable({ bytes = bytes, p = p, sections = sections, norms = cached_norms(bytes, p, sections), storage_mode = "in-memory" }, { __index = model })
+    return setmetatable({ bytes = bytes, p = p, sections = sections, norms = cached_norms(bytes, p, sections), scales = cached_scales(bytes, sections), storage_mode = "in-memory" }, { __index = model })
   end
   return setmetatable({ file = file, p = p, sections = sections, storage_mode = "disk-streamed" }, { __index = model })
 end
@@ -90,6 +105,7 @@ function model:close()
   if self.file then self.file:close(); self.file = nil end
   self.bytes = nil
   self.norms = nil
+  self.scales = nil
 end
 
 function model:read(offset, count)
@@ -117,7 +133,7 @@ function model:row(section, row, out)
   if row < 0 or row >= section.rows then error("model row outside section") end
   if self.bytes then
     local offset = section.offset + row * (width + 4)
-    local scale = storage.f32le(self.bytes, offset + 1)
+    local scale = self.scales[section][row + 1]
     for j = 1, width do out[j] = storage.signed_byte(self.bytes, offset + 4 + j) * scale end
     return
   end
@@ -132,7 +148,7 @@ function model:matvec(section, row_base, input, output, rows)
   if self.bytes then
     for row = 0, rows - 1 do
       local offset = section.offset + (row_base + row) * (width + 4)
-      local scale = storage.f32le(self.bytes, offset + 1)
+      local scale = self.scales[section][row_base + row + 1]
       local sum = 0
       for col = 1, width do sum = sum + storage.signed_byte(self.bytes, offset + 4 + col) * input[col] end
       output[row + 1] = sum * scale

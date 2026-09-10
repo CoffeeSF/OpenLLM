@@ -2,7 +2,7 @@ local tensor = require("lib.tensor")
 local sampler = {}
 
 function sampler.new(temperature, seed)
-  return setmetatable({ temperature = temperature or 0.7, seed = seed or 123456789 }, { __index = sampler })
+  return setmetatable({ temperature = temperature or 0, seed = seed or 123456789 }, { __index = sampler })
 end
 
 function sampler:random()

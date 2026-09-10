@@ -69,8 +69,8 @@ For a matrix-vector multiply, `lib/model.lua` reads one row's scale and signed
 INT8 bytes and computes the dot product with the current activation. At 2048
 KiB it seeks each row from disk. At 4096 KiB or more it retains the unchanged
 OCQ8 file as one compact Lua string, reads weights at direct byte offsets, and
-caches the 704 RMS-normalization values. It does not turn weights into large
-Lua number tables.
+caches the 704 RMS-normalization values plus 3,512 row scales. It does not turn
+weights into large Lua number tables.
 
 The token embedding table is also row-addressable. Because stories260K ties its
 classifier to the embedding table, the final vocabulary projection reuses that
@@ -83,8 +83,8 @@ For each input or generated token, `lib/llm.lua` performs this sequence:
 1. Read the token's embedding row into the 64-value activation buffer.
 2. For each of the five layers, read its normalization values and stream the
    query, key, value, attention-output, and feed-forward matrix rows.
-3. Apply RoPE position rotation in Lua; source RoPE lookup tables are not kept
-   in the installed model.
+3. Apply RoPE position rotation in Lua. The 4 MiB mode precomputes its sine and
+   cosine values; the 2 MiB mode computes them per token.
 4. Append the layer's Q12 key and value vectors to an in-memory packed string
    at 4 MiB, or `cache/kv-<layer>.bin` at 2 MiB.
 5. Read only the context-so-far cache to calculate causal attention.
@@ -119,10 +119,10 @@ Prompt encoding adds the model's BOS token and a leading-space token, applies
 byte fallback for unknown bytes, then repeatedly merges the highest-scoring
 pair.
 
-Sampling is greedy when temperature is zero. At a positive temperature, the
-runtime applies softmax and samples from the complete 512-token distribution
-using a local linear-congruential pseudo-random generator. There is no external
-randomness or service dependency.
+Single-machine mode defaults to greedy sampling at temperature zero. At a
+positive temperature, the runtime applies softmax and samples from the complete
+512-token distribution using a local linear-congruential pseudo-random
+generator. There is no external randomness or service dependency.
 
 ## Installation and launch
 
@@ -149,7 +149,7 @@ openllm /mnt/314/openllm
 ```
 
 In the terminal interface, use a short story beginning. `/temp 0` chooses the
-most likely next token; `/temp 0.7` is the default stochastic mode;
+most likely next token and is the default; `/temp 0.7` enables stochastic mode;
 `/context 256` changes the context for the next prompt; and `/quit` exits.
 
 ## Development verification
