@@ -17,7 +17,7 @@ function llm.new(root, options)
   self.root = root
   self.model = model_reader.open(root .. "/model/model.bin")
   self.p = self.model.p
-  self.context = math.min(options.context or 16, 64, self.p.max_seq_len)
+  self.context = math.min(options.context or 128, self.p.max_seq_len)
   if self.context < 2 then error("context must be at least 2 tokens") end
   self.tok = tokenizer.load(root .. "/model/tokenizer.bin", self.p.vocab_size)
   self.sample = sampler.new(options.temperature or 0.7, options.seed or math.floor(computer.uptime() * 1000) + 1)

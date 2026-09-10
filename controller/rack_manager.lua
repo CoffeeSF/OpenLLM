@@ -23,7 +23,7 @@ local function put(address,path,data)
 end
 local common={"lib/storage.lua","lib/tensor.lua","lib/tokenizer.lua","lib/sampler.lua","lib/protocol.lua","lib/distributed_model.lua","lib/distributed.lua","server/worker.lua","server/coordinator.lua","model/tokenizer.bin"}
 local function rack_config()
-  return "return { coordinator = "..string.format("%q",cfg.coordinator)..", workers = { [1] = "..string.format("%q",cfg.workers[1])..", [2] = "..string.format("%q",cfg.workers[2])..", [3] = "..string.format("%q",cfg.workers[3]).." }, context = 16, timeout = "..cfg.timeout.." }\n"
+  return "return { coordinator = "..string.format("%q",cfg.coordinator)..", workers = { [1] = "..string.format("%q",cfg.workers[1])..", [2] = "..string.format("%q",cfg.workers[2])..", [3] = "..string.format("%q",cfg.workers[3]).." }, context = 128, timeout = "..cfg.timeout.." }\n"
 end
 local function install(address,id)
   print("Installing server "..id); for _,file in ipairs(common) do put(address,cfg.install_root.."/"..file,fetch(file)) end

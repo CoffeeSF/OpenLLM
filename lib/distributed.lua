@@ -2,7 +2,7 @@
 local tensor=require("lib.tensor"); local protocol=require("lib.protocol")
 local D={}
 function D.new(model, context)
-  local p=model.p; return setmetatable({m=model,p=p,context=context,kc={},vc={},norm=tensor.zeros(64),xb=tensor.zeros(64),q=tensor.zeros(16),k=tensor.zeros(8),v=tensor.zeros(8),att=tensor.zeros(context),hb=tensor.zeros(p.ffn_count),hb2=tensor.zeros(p.ffn_count),out=tensor.zeros(64)}, {__index=D})
+  local p=model.p; context=math.max(2,math.min(context or 128,p.max_seq_len)); return setmetatable({m=model,p=p,context=context,kc={},vc={},norm=tensor.zeros(64),xb=tensor.zeros(64),q=tensor.zeros(16),k=tensor.zeros(8),v=tensor.zeros(8),att=tensor.zeros(context),hb=tensor.zeros(p.ffn_count),hb2=tensor.zeros(p.ffn_count),out=tensor.zeros(64)}, {__index=D})
 end
 local function rope(vec,start,pos)
   for i=1,#vec,2 do local hd=(start+i-1)%8; local a=pos/(10000^(hd/8)); local c,s=math.cos(a),math.sin(a); local x,y=vec[i],vec[i+1]; vec[i],vec[i+1]=x*c-y*s end

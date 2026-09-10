@@ -17,13 +17,13 @@ The implementation targets the `stories260K` TinyStories checkpoint:
 | Attention | 8 query heads, 4 key/value heads |
 | Vocabulary | 512 BPE pieces |
 | Model maximum sequence length | 512 tokens |
-| Runtime context limit | 64 tokens; default 16 |
+| Runtime context limit | 512 tokens; default 128 |
 | Installed INT8 model | 276,448 bytes |
 
-The 64-token runtime limit is deliberate. The model itself permits 512 tokens,
-but a larger context consumes more OpenComputers RAM and makes each generated
-token slower. It is not a rolling window: prompt tokens plus generated tokens
-must fit inside the chosen context.
+The runtime supports the model's full 512-token sequence length and defaults
+to 128 tokens. Larger contexts consume more OpenComputers RAM and make each
+generated token slower. It is not a rolling window: prompt tokens plus
+generated tokens must fit inside the chosen context.
 
 ## Installed layout
 
@@ -141,7 +141,7 @@ openllm /mnt/314/openllm
 
 In the terminal interface, use a short story beginning. `/temp 0` chooses the
 most likely next token; `/temp 0.7` is the default stochastic mode;
-`/context 16` changes the context for the next prompt; and `/quit` exits.
+`/context 128` changes the context for the next prompt; and `/quit` exits.
 
 ## Development verification
 

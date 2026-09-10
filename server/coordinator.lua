@@ -1,7 +1,7 @@
 local raw={...}; local root=raw[1] or "/openllm"; package.path=root.."/?.lua;"..package.path
 local component=require("component"); local event=require("event"); local shell=require("shell"); local computer=require("computer")
 local protocol=require("lib.protocol"); local Shard=require("lib.distributed_model"); local Engine=require("lib.distributed"); local tensor=require("lib.tensor"); local Tok=require("lib.tokenizer"); local Sampler=require("lib.sampler")
-local args,opts=shell.parse(...); root=args[1] or root; local cfg=assert(loadfile(root.."/config/rack.lua"))(); local context=tonumber(opts.context) or cfg.context or 16
+local args,opts=shell.parse(...); root=args[1] or root; local cfg=assert(loadfile(root.."/config/rack.lua"))(); local context=math.max(2,math.min(tonumber(opts.context) or cfg.context or 128,512))
 local modem=assert(component.modem,"network card required"); modem.open(protocol.port); local m=Shard.open(root.."/model/shard-0.bin"); local e=Engine.new(m,context); local tok=Tok.load(root.."/model/tokenizer.bin",512); local sampler=Sampler.new(tonumber(opts.temperature) or .7,math.floor(computer.uptime()*1000)); local norm=tensor.zeros(64); local session=tostring(math.floor(computer.uptime()*100000)); local seq=0
 local function sum(parts) local out=tensor.zeros(64); for _,v in pairs(parts) do for i=1,64 do out[i]=out[i]+v[i] end end; return out end
 local function remote(kind,layer,pos,x)

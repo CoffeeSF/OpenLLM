@@ -4,12 +4,12 @@ local llm = require("lib.llm")
 
 local arguments, options = shell.parse(...)
 local root = arguments[1] or "/openllm"
-local context = tonumber(options.context) or 16
+local context = tonumber(options.context) or 128
 local temperature = tonumber(options.temperature) or 0.7
 
 io.write("OpenLLM stories260K (local INT8, disk-streamed)\n")
 io.write("context=" .. context .. "  temperature=" .. temperature .. "\n")
-io.write("Enter a short story beginning. Commands: /quit, /temp <number>, /context <2-64>\n\n")
+io.write("Enter a short story beginning. Commands: /quit, /temp <number>, /context <2-512>\n\n")
 
 local function open_runtime()
   return llm.new(root, { context = context, temperature = temperature })
@@ -28,7 +28,7 @@ while true do
     runtime:close(); runtime = open_runtime()
     print("temperature=" .. temperature)
   elseif next_context then
-    context = math.max(2, math.min(64, tonumber(next_context)))
+    context = math.max(2, math.min(512, tonumber(next_context)))
     runtime:close(); runtime = open_runtime()
     print("context=" .. context)
   elseif #prompt > 0 then

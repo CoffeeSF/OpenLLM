@@ -13,14 +13,15 @@ An Internet-connected case-machine deployment controller is documented in
 The installed model is `OCQ8`, a 276,448-byte, row-quantized INT8 conversion
 of `stories260K`. Lua seeks each matrix row from the RAID-backed file, uses it
 once, and discards it. Only small activation buffers, tokenizer data, logits,
-and a 16-token fixed-point key/value cache are resident in Lua.
+and a context-sized fixed-point key/value cache are resident in Lua.
 
 ## Hardware target
 
 Use a Tier-3-class OpenComputers machine with **2048 KiB total RAM** and a
 filesystem on the RAID with at least 1 MiB free (3 MiB drives in RAID are more
-than sufficient). The default context is **16 tokens**. It can be changed up
-to 64, but 16 is the safest initial setting for memory and responsiveness.
+than sufficient). The default context is **128 tokens**. It can be changed up
+to the model's **512-token** maximum. Longer contexts use more memory and can
+be too slow or memory-intensive for a 2 MiB machine.
 
 The runtime yields during matrix and attention work with
 `computer.pullSignal(0)` to avoid the execution watchdog. It does not include
@@ -62,7 +63,7 @@ openllm /mnt/raid/openllm
 ```
 
 Enter a short story beginning, e.g. `Once upon a time`. The interface supports
-`/temp 0.7`, `/context 16`, and `/quit`. A prompt plus its continuation must
+`/temp 0.7`, `/context 128`, and `/quit`. A prompt plus its continuation must
 fit the selected context. This is a TinyStories continuation model, not an
 instruction-following chat assistant.
 
@@ -99,7 +100,7 @@ reconstructs every quantized row to check the stored scales and integers.
 
 The intentional additional approximation is Q12 fixed-point storage for the
 on-disk KV cache (1/4096 steps); this keeps context state out of Lua tables.
-Use short prompts and the default 16-token context when checking results
+Use short prompts and the default 128-token context when checking results
 against a float reference.
 
 ## Model source and license

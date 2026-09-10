@@ -20,6 +20,10 @@ This is tensor parallelism, not a pipeline: every generated token still waits
 for all layers and workers. It may reduce weight-read work, but modem latency
 can outweigh the benefit on some 1.7.10 worlds.
 
+Rack mode defaults to a 128-token context and accepts up to the model's
+512-token maximum. To use another value, start the coordinator with
+`--context=<2-512>`; the coordinator clamps it to that range.
+
 ## Clone-safe disk image install
 
 For four identical disks that configure themselves on boot, use a separate

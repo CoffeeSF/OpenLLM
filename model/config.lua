@@ -5,6 +5,6 @@ return {
   dim = 64, hidden_dim = 172, n_layers = 5, n_heads = 8,
   n_kv_heads = 4, vocab_size = 512, max_seq_len = 512,
   shared_classifier = true,
-  context_length = 16,
+  context_length = 128,
   model_bytes = 276448,
 }
