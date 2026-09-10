@@ -1,12 +1,13 @@
--- Disk-backed OCQ8 model reader. It never materializes model weights in Lua.
+-- OCQ8 reader. 2 MiB machines stream rows from disk; 4 MiB machines retain
+-- the same compact model bytes in one string to avoid repeated filesystem reads.
 local storage = require("lib.storage")
 local computer = require("computer")
 local model = {}
 
 local HEADER_SIZE = 256
+local IN_MEMORY_MIN_RAM = 4096 * 1024
 
-local function checked_header(file)
-  local header = storage.read_exact(file, HEADER_SIZE)
+local function checked_header(header)
   if header:sub(1, 4) ~= "OCQ8" then error("model.bin is not an OCQ8 model") end
   local version = storage.u32le(header, 5)
   if version ~= 1 then error("unsupported OCQ8 model version " .. version) end
@@ -56,41 +57,56 @@ end
 function model.open(path)
   local file, reason = io.open(path, "rb")
   if not file then error("cannot open model: " .. tostring(reason)) end
-  local ok, p = pcall(checked_header, file)
+  local header = storage.read_exact(file, HEADER_SIZE)
+  local ok, p = pcall(checked_header, header)
   if not ok then file:close(); error(p) end
   local sections, expected = section_offsets(p)
   local actual = file:seek("end")
   if actual < expected then file:close(); error("model.bin is truncated") end
-  return setmetatable({ file = file, p = p, sections = sections }, { __index = model })
+  if computer.totalMemory() >= IN_MEMORY_MIN_RAM then
+    file:seek("set", 0)
+    local bytes = storage.read_exact(file, actual)
+    file:close()
+    return setmetatable({ bytes = bytes, p = p, sections = sections, storage_mode = "in-memory" }, { __index = model })
+  end
+  return setmetatable({ file = file, p = p, sections = sections, storage_mode = "disk-streamed" }, { __index = model })
 end
 
-function model:close() if self.file then self.file:close(); self.file = nil end end
+function model:close()
+  if self.file then self.file:close(); self.file = nil end
+  self.bytes = nil
+end
+
+function model:read(offset, count)
+  if self.bytes then return self.bytes:sub(offset + 1, offset + count) end
+  self.file:seek("set", offset)
+  return storage.read_exact(self.file, count)
+end
 
 function model:norm(kind, layer, out)
   local offset
   if kind == "att" then offset = self.sections.norm_att + layer * self.p.dim * 4
   elseif kind == "ffn" then offset = self.sections.norm_ffn + layer * self.p.dim * 4
   else offset = self.sections.norm_final end
-  self.file:seek("set", offset)
-  local bytes = storage.read_exact(self.file, self.p.dim * 4)
+  local bytes = self:read(offset, self.p.dim * 4)
   for i = 1, self.p.dim do out[i] = storage.f32le(bytes, (i - 1) * 4 + 1) end
 end
 
 function model:row(section, row, out)
   local width = section.columns
   if row < 0 or row >= section.rows then error("model row outside section") end
-  self.file:seek("set", section.offset + row * (width + 4))
-  local scale = storage.read_f32(self.file)
-  local values = storage.read_exact(self.file, width)
+  local bytes = self:read(section.offset + row * (width + 4), width + 4)
+  local scale = storage.f32le(bytes, 1)
+  local values = bytes:sub(5)
   for j = 1, width do out[j] = storage.signed_byte(values, j) * scale end
 end
 
 function model:matvec(section, row_base, input, output, rows)
   local width = section.columns
   for row = 0, rows - 1 do
-    self.file:seek("set", section.offset + (row_base + row) * (width + 4))
-    local scale = storage.read_f32(self.file)
-    local weights = storage.read_exact(self.file, width)
+    local bytes = self:read(section.offset + (row_base + row) * (width + 4), width + 4)
+    local scale = storage.f32le(bytes, 1)
+    local weights = bytes:sub(5)
     local sum = 0
     for col = 1, width do sum = sum + storage.signed_byte(weights, col) * input[col] end
     output[row + 1] = sum * scale

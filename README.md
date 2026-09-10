@@ -27,6 +27,13 @@ The runtime yields during matrix and attention work with
 `computer.pullSignal(0)` to avoid the execution watchdog. It does not include
 benchmarks or in-game performance tests.
 
+On a machine with **4096 KiB (4 MiB) RAM or more**, normal single-machine
+launches automatically use the in-memory mode. It stores the unchanged compact
+276,448-byte `model.bin` as one Lua string and avoids repeated filesystem row
+reads. A 2048 KiB machine automatically retains the disk-streamed mode. Rack
+mode remains separate: its four servers continue to use their in-memory model
+shards and communicate through modems.
+
 ## Install
 
 Publish this repository under the `CoffeeSF/OpenLLM` name. From

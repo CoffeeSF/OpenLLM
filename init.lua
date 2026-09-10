@@ -7,7 +7,7 @@ local root = arguments[1] or "/openllm"
 local context = tonumber(options.context) or 128
 local temperature = tonumber(options.temperature) or 0.7
 
-io.write("OpenLLM stories260K (local INT8, disk-streamed)\n")
+io.write("OpenLLM stories260K (local INT8)\n")
 io.write("context=" .. context .. "  temperature=" .. temperature .. "\n")
 io.write("Enter a short story beginning. Commands: /quit, /temp <number>, /context <2-512>\n\n")
 
@@ -16,6 +16,7 @@ local function open_runtime()
 end
 
 local runtime = open_runtime()
+io.write("model storage=" .. runtime.model.storage_mode .. "\n")
 while true do
   io.write("> ")
   local prompt = io.read("l")

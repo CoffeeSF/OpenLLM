@@ -63,9 +63,12 @@ matrices. Every matrix row is stored independently:
 float32 scale | int8 weight[columns]
 ```
 
-For a matrix-vector multiply, `lib/model.lua` seeks to one row, reads its scale
-and signed INT8 bytes, computes the dot product with the current activation,
-then releases those bytes. No complete weight matrix is loaded into Lua.
+For a matrix-vector multiply, `lib/model.lua` reads one row's scale and signed
+INT8 bytes, computes the dot product with the current activation, then releases
+those temporary bytes. At 2048 KiB it seeks each row from disk. At 4096 KiB or
+more it automatically retains the complete unchanged OCQ8 file as one compact
+Lua string, avoiding repeated filesystem reads without turning weights into
+large Lua number tables.
 
 The token embedding table is also row-addressable. Because stories260K ties its
 classifier to the embedding table, the final vocabulary projection reuses that
