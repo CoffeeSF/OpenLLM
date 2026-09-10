@@ -21,12 +21,19 @@ local function mkdir_p(path)
   assert(filesystem.makeDirectory(path))
 end
 
+local function space_available(fs)
+  -- Component filesystem proxies expose spaceTotal/spaceUsed. The OpenOS
+  -- filesystem library offers spaceAvailable(path), but proxies usually do not.
+  if fs.spaceAvailable then return fs.spaceAvailable() end
+  return fs.spaceTotal() - fs.spaceUsed()
+end
+
 local function report_filesystems()
   print("Detected filesystems:")
   for address in component.list("filesystem") do
     local fs = component.proxy(address)
     local total = fs.spaceTotal and fs.spaceTotal() or 0
-    local free = fs.spaceAvailable and fs.spaceAvailable() or 0
+    local free = space_available(fs)
     print("  " .. address:sub(1, 8) .. "  " .. math.floor(total / 1024) .. " KiB total, " .. math.floor(free / 1024) .. " KiB free")
   end
 end
@@ -56,7 +63,7 @@ report_filesystems()
 local target_address = filesystem.get(destination)
 if not target_address then error("cannot find filesystem for " .. destination) end
 local target_fs = component.proxy(target_address)
-local available = target_fs.spaceAvailable()
+local available = space_available(target_fs)
 print("Destination: " .. destination .. " (" .. math.floor(available / 1024) .. " KiB free)")
 if available < REQUIRED_STORAGE then error("destination needs at least " .. REQUIRED_STORAGE / 1024 .. " KiB free") end
 
